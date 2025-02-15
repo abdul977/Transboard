@@ -1,5 +1,4 @@
 apply plugin: "com.android.application"
-apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
@@ -83,6 +82,38 @@ def jscFlavor = 'org.webkit:android-jsc:+'
 android {
     ndkVersion rootProject.ext.ndkVersion
 
+    sourceSets {
+        main {
+            java {
+                srcDirs = ['src/main/java']
+            }
+        }
+    }
+
+    defaultConfig {
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_STL=c++_shared",
+                         "-DFOLLY_NO_CONFIG=1",
+                         "-DFOLLY_HAVE_LIBJEMALLOC=0",
+                         "-DFOLLY_HAVE_LIBGFLAGS=0",
+                         "-DFOLLY_HAVE_LIBAIO=0",
+                         "-DFOLLY_HAVE_LIBDL=0"
+                cppFlags "-std=c++17",
+                        "-fexceptions",
+                        "-frtti",
+                        "-DFOLLY_USE_LIBCPP=1",
+                        "-DHAS_COPPER=1",
+                        "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES",
+                        "-D_LIBCPP_DISABLE_AVAILABILITY"
+            }
+        }
+    }
+ 
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
@@ -105,13 +136,14 @@ android {
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
+            buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", "false"
+            buildConfigField "boolean", "IS_HERMES_ENABLED", "true"
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
             signingConfig signingConfigs.debug
-            shrinkResources (findProperty('android.enableShrinkResourcesInReleaseBuilds')?.toBoolean() ?: false)
-            minifyEnabled enableProguardInReleaseBuilds
+            buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", "false"
+            buildConfigField "boolean", "IS_HERMES_ENABLED", "true"
+            minifyEnabled true
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
             crunchPngs (findProperty('android.enablePngCrunchInReleaseBuilds')?.toBoolean() ?: true)
         }
@@ -173,4 +205,6 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+    
+    // Debug dependencies removed (Flipper disabled)
 }
