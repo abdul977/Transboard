@@ -8,6 +8,11 @@ buildscript {
         targetSdkVersion = Integer.parseInt(findProperty('android.targetSdkVersion') ?: '34')
         kotlinVersion = findProperty('android.kotlinVersion') ?: '1.9.25'
 
+
+        // Flipper and Fresco versions
+        FLIPPER_VERSION = '0.182.0'
+        FRESCO_VERSION = '2.6.0'
+        
         ndkVersion = "26.1.10909125"
     }
     repositories {
@@ -37,5 +42,6 @@ allprojects {
         google()
         mavenCentral()
         maven { url 'https://www.jitpack.io' }
+        maven { url 'https://mvnrepository.com/artifact/com.facebook.fresco/fresco' }
     }
 }

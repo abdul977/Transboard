@@ -150,6 +150,19 @@ dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
 
+     // Flipper
+    debugImplementation("com.facebook.flipper:flipper:${FLIPPER_VERSION}")
+    debugImplementation("com.facebook.flipper:flipper-network-plugin:${FLIPPER_VERSION}")
+    debugImplementation("com.facebook.flipper:flipper-fresco-plugin:${FLIPPER_VERSION}")
+
+    // Fresco
+    implementation("com.facebook.fresco:fresco:${FRESCO_VERSION}")
+    implementation("com.facebook.fresco:flipper:${FRESCO_VERSION}")
+    implementation("com.facebook.fresco:stetho:${FRESCO_VERSION}") {
+        exclude group: 'com.facebook.stetho', module: '*'
+    }
+    implementation("com.parse.bolts:bolts-tasks:1.4.0")
+
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";
     def isWebpAnimatedEnabled = (findProperty('expo.webp.animated') ?: "") == "true";
