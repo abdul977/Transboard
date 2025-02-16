@@ -29,9 +29,16 @@ class OverlayModule(private val reactContext: ReactApplicationContext) : ReactCo
     private fun setupBroadcastReceiver() {
         recordingReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
+                android.util.Log.d("OverlayModule", "Received broadcast: ${intent?.action}")
                 when (intent?.action) {
-                    ACTION_START_RECORDING -> sendEvent("onStartRecording", null)
-                    ACTION_STOP_RECORDING -> sendEvent("onStopRecording", null)
+                    ACTION_START_RECORDING -> {
+                        android.util.Log.d("OverlayModule", "Sending onStartRecording event")
+                        sendEvent("onStartRecording", null)
+                    }
+                    ACTION_STOP_RECORDING -> {
+                        android.util.Log.d("OverlayModule", "Sending onStopRecording event")
+                        sendEvent("onStopRecording", null)
+                    }
                 }
             }
         }
@@ -40,10 +47,15 @@ class OverlayModule(private val reactContext: ReactApplicationContext) : ReactCo
             addAction(ACTION_START_RECORDING)
             addAction(ACTION_STOP_RECORDING)
         }
-        reactContext.registerReceiver(recordingReceiver, filter)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            reactContext.registerReceiver(recordingReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            reactContext.registerReceiver(recordingReceiver, filter)
+        }
     }
 
     private fun sendEvent(eventName: String, params: Any?) {
+        android.util.Log.d("OverlayModule", "Emitting event: $eventName")
         reactContext
             .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
             .emit(eventName, params)

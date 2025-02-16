@@ -19,26 +19,26 @@ export const useOverlay = () => {
   useEffect(() => {
     if (Platform.OS !== 'android') return;
 
+    console.log('[useOverlay] Setting up event listeners');
+
     const startSubscription = eventEmitter.addListener(
       'onStartRecording',
       () => {
-        startRecording();
+        console.log('[useOverlay] Received onStartRecording event');
+        startRecording().catch(error => {
+          console.error('[useOverlay] Start recording error:', error);
+        });
       }
     );
 
     const stopSubscription = eventEmitter.addListener(
       'onStopRecording',
       () => {
-        stopRecording();
+        console.log('[useOverlay] Received onStopRecording event');
+        stopRecording().catch(error => {
+          console.error('[useOverlay] Stop recording error:', error);
+        });
       }
-    );
-
-    return () => {
-      startSubscription.remove();
-      stopSubscription.remove();
-    };
-  }, [startRecording, stopRecording]);
-
   const checkOverlayPermission = async (): Promise<boolean> => {
     if (Platform.OS !== 'android') return false;
     try {

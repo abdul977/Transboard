@@ -53,23 +53,51 @@ class OverlayService : Service() {
             y = 100
         }
 
-        recordButton.setOnClickListener { toggleRecording() }
+        // Remove separate click listener as we handle it in touch events
     }
+
+    private var isDragging = false
+    private var lastActionTime = 0L
+    private val CLICK_THRESHOLD = 300L // milliseconds, increased for better detection
+    private val MOVE_THRESHOLD = 10f // pixels
 
     private fun setupDragListener() {
         overlayView.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
+                    android.util.Log.d("OverlayService", "Touch DOWN")
                     touchX = event.rawX
                     touchY = event.rawY
                     initialX = params.x
                     initialY = params.y
+                    lastActionTime = System.currentTimeMillis()
+                    isDragging = false
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    params.x = initialX + (event.rawX - touchX).toInt()
-                    params.y = initialY + (event.rawY - touchY).toInt()
-                    windowManager.updateViewLayout(overlayView, params)
+                    android.util.Log.d("OverlayService", "Touch MOVE")
+                    val deltaX = event.rawX - touchX
+                    val deltaY = event.rawY - touchY
+                    
+                    // Only consider it a drag if moved more than threshold
+                    if (!isDragging && (Math.abs(deltaX) > MOVE_THRESHOLD || Math.abs(deltaY) > MOVE_THRESHOLD)) {
+                        isDragging = true
+                    }
+                    
+                    if (isDragging) {
+                        params.x = initialX + deltaX.toInt()
+                        params.y = initialY + deltaY.toInt()
+                        windowManager.updateViewLayout(overlayView, params)
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    val actionTime = System.currentTimeMillis() - lastActionTime
+                    android.util.Log.d("OverlayService", "Touch UP - Time: $actionTime ms, isDragging: $isDragging")
+                    if (!isDragging && actionTime < CLICK_THRESHOLD) {
+                        android.util.Log.d("OverlayService", "Triggering recording toggle")
+                        toggleRecording()
+                    }
                     true
                 }
                 else -> false
@@ -83,10 +111,12 @@ class OverlayService : Service() {
 
     private fun toggleRecording() {
         isRecording = !isRecording
+        android.util.Log.d("OverlayService", "Toggle recording. isRecording: $isRecording")
         if (isRecording) startRecording() else stopRecording()
     }
 
     private fun startRecording() {
+        android.util.Log.d("OverlayService", "Starting recording...")
         recordButton.setImageResource(android.R.drawable.ic_media_pause)
         timerView.visibility = View.VISIBLE
         recordingSeconds = 0
@@ -95,6 +125,7 @@ class OverlayService : Service() {
     }
 
     private fun stopRecording() {
+        android.util.Log.d("OverlayService", "Stopping recording...")
         recordButton.setImageResource(android.R.drawable.ic_btn_speak_now)
         timerView.visibility = View.GONE
         timerHandler.removeCallbacksAndMessages(null)
