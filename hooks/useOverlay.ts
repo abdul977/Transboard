@@ -1,51 +1,56 @@
-import { useEffect } from 'react';
-import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
+import { useEffect, useState, useCallback } from 'react';
+import { NativeEventEmitter, NativeModules, Platform, EmitterSubscription, NativeModule } from 'react-native';
 import { useTranscription } from '@/context/transcription';
 
-const { OverlayModule } = NativeModules;
+class OverlayError extends Error {
+  constructor(message: string, public code: string) {
+    super(message);
+    this.name = 'OverlayError';
+  }
+}
 
-interface OverlayModuleInterface {
+// Base interface for module methods
+interface OverlayModuleMethods {
   checkPermission(): Promise<boolean>;
   requestPermission(): Promise<boolean>;
   showOverlay(): Promise<boolean>;
   hideOverlay(): Promise<boolean>;
+  onRecordingError?: (error: string) => void;
 }
 
+// Interface that extends NativeModule for EventEmitter compatibility
+interface OverlayModuleType extends OverlayModuleMethods, NativeModule {}
+
+// Event types for type safety
+interface OverlayEvents {
+  onStartRecording: void;
+  onStopRecording: void;
+  onRecordingError: string;
+}
+
+const OverlayModule = NativeModules.OverlayModule as OverlayModuleType;
 const eventEmitter = new NativeEventEmitter(OverlayModule);
 
+type SubscriptionsType = {
+  start: EmitterSubscription;
+  stop: EmitterSubscription;
+  error: EmitterSubscription;
+};
+
 export const useOverlay = () => {
-  const { startRecording, stopRecording } = useTranscription();
+  const { state, dispatch, audioService, transcriptionService } = useTranscription();
+  const [isOverlayActive, setIsOverlayActive] = useState(false);
 
-  useEffect(() => {
-    if (Platform.OS !== 'android') return;
-
-    console.log('[useOverlay] Setting up event listeners');
-
-    const startSubscription = eventEmitter.addListener(
-      'onStartRecording',
-      () => {
-        console.log('[useOverlay] Received onStartRecording event');
-        startRecording().catch(error => {
-          console.error('[useOverlay] Start recording error:', error);
-        });
-      }
-    );
-
-    const stopSubscription = eventEmitter.addListener(
-      'onStopRecording',
-      () => {
-        console.log('[useOverlay] Received onStopRecording event');
-        stopRecording().catch(error => {
-          console.error('[useOverlay] Stop recording error:', error);
-        });
-      }
   const checkOverlayPermission = async (): Promise<boolean> => {
     if (Platform.OS !== 'android') return false;
     try {
       return await OverlayModule.checkPermission();
     } catch (error) {
       console.error('Error checking overlay permission:', error);
-      return false;
+      throw new OverlayError(
+        'Failed to check overlay permission',
+        'PERMISSION_CHECK_FAILED'
+      );
     }
   };
 
@@ -55,7 +60,10 @@ export const useOverlay = () => {
       return await OverlayModule.requestPermission();
     } catch (error) {
       console.error('Error requesting overlay permission:', error);
-      return false;
+      throw new OverlayError(
+        'Failed to request overlay permission',
+        'PERMISSION_REQUEST_FAILED'
+      );
     }
   };
 
@@ -65,29 +73,149 @@ export const useOverlay = () => {
       const hasPermission = await checkOverlayPermission();
       if (!hasPermission) {
         const granted = await requestOverlayPermission();
-        if (!granted) return false;
+        if (!granted) {
+          throw new OverlayError(
+            'Overlay permission not granted',
+            'PERMISSION_DENIED'
+          );
+        }
       }
-      return await OverlayModule.showOverlay();
+      const shown = await OverlayModule.showOverlay();
+      if (shown) {
+        setIsOverlayActive(true);
+      }
+      return shown;
     } catch (error) {
       console.error('Error showing overlay:', error);
-      return false;
+      if (error instanceof OverlayError) {
+        throw error;
+      }
+      throw new OverlayError(
+        'Failed to show overlay',
+        'SHOW_OVERLAY_FAILED'
+      );
     }
   };
 
   const hideOverlay = async (): Promise<boolean> => {
     if (Platform.OS !== 'android') return false;
     try {
-      return await OverlayModule.hideOverlay();
+      const hidden = await OverlayModule.hideOverlay();
+      if (hidden) {
+        setIsOverlayActive(false);
+      }
+      return hidden;
     } catch (error) {
       console.error('Error hiding overlay:', error);
-      return false;
+      throw new OverlayError(
+        'Failed to hide overlay',
+        'HIDE_OVERLAY_FAILED'
+      );
     }
   };
 
+  const startOverlayRecording = useCallback(async () => {
+    if (!isOverlayActive) {
+      throw new OverlayError('Overlay must be active to start recording', 'OVERLAY_INACTIVE');
+    }
+    
+    try {
+      await audioService.startRecording();
+      // Don't dispatch SET_PROCESSING to avoid UI updates in main app
+      dispatch({ type: 'SET_RECORDING', payload: true });
+    } catch (error) {
+      console.error('[useOverlay] Start recording error:', error);
+      throw new OverlayError(
+        error instanceof Error ? error.message : 'Failed to start recording',
+        'RECORDING_START_FAILED'
+      );
+    }
+  }, [isOverlayActive, audioService, dispatch]);
+
+  const stopOverlayRecording = useCallback(async () => {
+    if (!isOverlayActive) {
+      throw new OverlayError('Overlay must be active to stop recording', 'OVERLAY_INACTIVE');
+    }
+
+    try {
+      const uri = await audioService.stopRecording();
+      dispatch({ type: 'SET_RECORDING', payload: false });
+      
+      if (uri) {
+        const response = await transcriptionService.processRecording(uri);
+        // Send text directly to focused input without updating main app state
+        if (response.text) {
+          await transcriptionService.sendToApp(response.text, undefined, true);
+        }
+      }
+    } catch (error) {
+      console.error('[useOverlay] Stop recording error:', error);
+      throw new OverlayError(
+        error instanceof Error ? error.message : 'Failed to stop recording',
+        'RECORDING_STOP_FAILED'
+      );
+    }
+  }, [isOverlayActive, audioService, transcriptionService, dispatch]);
+
+  useEffect(() => {
+    let isMounted = true;
+    
+    const setupEventListeners = async () => {
+      if (Platform.OS !== 'android') return null;
+
+      console.log('[useOverlay] Setting up event listeners');
+
+      const subscriptions: SubscriptionsType = {
+        start: eventEmitter.addListener('onStartRecording', async () => {
+          if (!isMounted) return;
+          try {
+            await startOverlayRecording();
+          } catch (error) {
+            if (error instanceof OverlayError) {
+              OverlayModule.onRecordingError?.(error.message);
+            }
+          }
+        }),
+        
+        stop: eventEmitter.addListener('onStopRecording', async () => {
+          if (!isMounted) return;
+          try {
+            await stopOverlayRecording();
+          } catch (error) {
+            if (error instanceof OverlayError) {
+              OverlayModule.onRecordingError?.(error.message);
+            }
+          }
+        }),
+        
+        error: eventEmitter.addListener('onRecordingError', (error: string) => {
+          if (!isMounted) return;
+          console.error('[useOverlay] Recording error event:', error);
+          // Handle error (e.g., show toast or notification)
+        })
+      };
+
+      return subscriptions;
+    };
+
+    const subscriptionsPromise = setupEventListeners();
+
+    return () => {
+      console.log('[useOverlay] Cleaning up event listeners');
+      isMounted = false;
+      subscriptionsPromise.then(subs => {
+        if (subs) {
+          Object.values(subs).forEach(sub => sub.remove());
+        }
+      });
+    };
+  }, [startOverlayRecording, stopOverlayRecording]);
+
   return {
+    isOverlayActive,
     checkOverlayPermission,
     requestOverlayPermission,
     showOverlay,
     hideOverlay,
-  };
+  } as const;
 };

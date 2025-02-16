@@ -1,4 +1,7 @@
 import { TranscriptionSegment, TranscriptionMetadata } from '../../types/transcription';
+import { AudioService } from './services/audioService';
+import { TranscriptionService } from './services/transcriptionService';
+import React from 'react';
 
 export interface AudioSettings {
   autoDeleteAfterPlayback: boolean;
@@ -53,6 +56,9 @@ export type Action =
 
 export interface TranscriptionContextType {
   state: TranscriptionState;
+  dispatch: React.Dispatch<Action>;
+  audioService: AudioService;
+  transcriptionService: TranscriptionService;
   startRecording: () => Promise<void>;
   stopRecording: () => Promise<void>;
   copyToClipboard: (text: string) => Promise<void>;

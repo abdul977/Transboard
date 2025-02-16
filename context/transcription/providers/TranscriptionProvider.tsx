@@ -144,6 +144,9 @@ export const TranscriptionProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const value: TranscriptionContextType = {
     state,
+    dispatch,
+    audioService,
+    transcriptionService,
     startRecording: actions.startRecording,
     stopRecording: actions.stopRecording,
     deleteRecord: actions.deleteRecord,

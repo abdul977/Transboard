@@ -4,7 +4,7 @@ import * as FileSystem from 'expo-file-system';
 import * as Clipboard from 'expo-clipboard';
 import * as Sharing from 'expo-sharing';
 import * as IntentLauncher from 'expo-intent-launcher';
-import { Alert, Platform } from 'react-native';
+import { Alert, Platform, NativeModules } from 'react-native';
 import Groq from 'groq-sdk';
 import { 
   TranscriptionResponse, 
@@ -119,13 +119,26 @@ export class TranscriptionService {
     }
   }
 
-  async sendToApp(text: string, appPackage?: string): Promise<void> {
+  async sendToApp(text: string, appPackage?: string, isOverlayMode: boolean = false): Promise<void> {
     try {
       if (Platform.OS === 'ios') {
         await Clipboard.setStringAsync(text);
         Alert.alert('Success', 'Text copied to clipboard. Please paste in your desired app.');
       } else {
-        if (appPackage) {
+        if (isOverlayMode) {
+          try {
+            // Try to insert text directly
+            const inserted = await NativeModules.OverlayModule.insertTextIntoFocusedInput(text);
+            if (!inserted) {
+              // If direct insertion fails, fallback to clipboard
+              await Clipboard.setStringAsync(text);
+            }
+          } catch (error) {
+            console.error('Text insertion error:', error);
+            // Fallback to clipboard
+            await Clipboard.setStringAsync(text);
+          }
+        } else if (appPackage) {
           await IntentLauncher.startActivityAsync('android.intent.action.SEND', {
             type: 'text/plain',
             extra: { 'android.intent.extra.TEXT': text },
@@ -138,9 +151,10 @@ export class TranscriptionService {
           });
         }
       }
-    } catch (err) {
-      console.error('Send to app error:', err);
-      throw new Error(formatErrorMessage(err));
+    } catch (error) {
+      console.error('Send to app error:', error);
+      // Fallback to clipboard
+      await Clipboard.setStringAsync(text);
     }
   }
 

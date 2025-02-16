@@ -64,7 +64,7 @@ export const useTranscriptionActions = (config: UseTranscriptionActionsConfig) =
     await storageService.saveHistory(updatedHistory);
 
     if (state.isFloatingButtonVisible) {
-      await transcriptionService.sendToApp(transcription.text);
+      await transcriptionService.sendToApp(transcription.text, undefined, true);
     }
   }, [state.history, state.isFloatingButtonVisible, apiConfig]);
 
