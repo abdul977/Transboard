@@ -21,6 +21,8 @@ import android.widget.TextView
 class OverlayService : Service() {
     companion object {
         private const val ACTION_INSERT_TEXT = "com.transboard.app.INSERT_TEXT"
+        private const val ACTION_START_RECORDING = "com.transboard.app.START_RECORDING"
+        private const val ACTION_STOP_RECORDING = "com.transboard.app.STOP_RECORDING"
     }
     private lateinit var windowManager: WindowManager
     private lateinit var overlayView: View
@@ -94,11 +96,12 @@ class OverlayService : Service() {
             y = 100
         }
 
-        // Remove separate click listener as we handle it in touch events
+        // Initialize button state
+        updateRecordButtonState()
     }
 
     private val CLICK_DURATION_THRESHOLD = 200L // milliseconds
-    private val MOVE_THRESHOLD = 15f // pixels, slightly increased for better distinction
+    private val MOVE_THRESHOLD = 15f // pixels
 
     private fun setupDragListener() {
         overlayView.setOnTouchListener { _, event ->
@@ -149,47 +152,49 @@ class OverlayService : Service() {
     }
 
     private fun toggleRecording() {
-        if (!isRecording) {
-            // Start recording
-            isRecording = true
-            android.util.Log.d("OverlayService", "Starting recording...")
+        isRecording = !isRecording
+        updateRecordButtonState()
+        
+        if (isRecording) {
             startRecording()
         } else {
-            // Stop recording
-            isRecording = false
-            android.util.Log.d("OverlayService", "Stopping recording...")
             stopRecording()
         }
+    }
+
+    private fun updateRecordButtonState() {
+        recordButton.setImageResource(
+            if (isRecording) {
+                android.R.drawable.ic_media_pause
+            } else {
+                android.R.drawable.ic_btn_speak_now
+            }
+        )
+        timerView.visibility = if (isRecording) View.VISIBLE else View.GONE
     }
 
     private fun startRecording() {
         android.util.Log.d("OverlayService", "Starting recording...")
         try {
-            recordButton.setImageResource(android.R.drawable.ic_media_pause)
-            timerView.visibility = View.VISIBLE
             recordingSeconds = 0
             updateTimer()
 
-            // Use explicit intent with package name
-            val intent = Intent("com.transboard.app.START_RECORDING")
+            val intent = Intent(ACTION_START_RECORDING)
             intent.setPackage(applicationContext.packageName)
             sendBroadcast(intent)
         } catch (e: Exception) {
             android.util.Log.e("OverlayService", "Error starting recording", e)
             isRecording = false
-            recordButton.setImageResource(android.R.drawable.ic_btn_speak_now)
+            updateRecordButtonState()
         }
     }
 
     private fun stopRecording() {
         android.util.Log.d("OverlayService", "Stopping recording...")
         try {
-            recordButton.setImageResource(android.R.drawable.ic_btn_speak_now)
-            timerView.visibility = View.GONE
             timerHandler.removeCallbacksAndMessages(null)
 
-            // Use explicit intent with package name
-            val intent = Intent("com.transboard.app.STOP_RECORDING")
+            val intent = Intent(ACTION_STOP_RECORDING)
             intent.setPackage(applicationContext.packageName)
             sendBroadcast(intent)
         } catch (e: Exception) {

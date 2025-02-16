@@ -1,13 +1,13 @@
-fix(transcription): improve audio transcription with Groq API
+fix(overlay): improve recording state handling and error propagation
 
-- Update transcription service to properly handle file uploads
-- Add detailed error logging for API requests
-- Fix model configuration and endpoint settings
-- Add support for verbose_json response format
-- Increase request timeouts and size limits
-- Add comprehensive error handling and debug logging
+- Fix recording state synchronization between OverlayService and Module
+- Add proper error handling and propagation across native bridge
+- Improve broadcast communication between components
+- Add state reset on recording errors
+- Add safety checks for recording state transitions
+- Add hideOverlay method to properly clean up recording state
 
-This change fixes the overlay transcription functionality by properly
-configuring the Groq API integration and improving error handling.
-The changes should resolve issues with transcription not working
-and provide better visibility into any API errors.
+This change ensures that the overlay recording state is properly
+maintained between the native and JS layers, and that errors are
+properly handled and propagated. Users should now see proper
+behavior when starting/stopping recording and better error feedback.

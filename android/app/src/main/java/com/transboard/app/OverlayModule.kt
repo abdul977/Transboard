@@ -38,19 +38,26 @@ class OverlayModule(private val reactContext: ReactApplicationContext) : ReactCo
         recordingReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 android.util.Log.d("OverlayModule", "Received broadcast: ${intent?.action}")
+                
                 when (intent?.action) {
                     ACTION_START_RECORDING -> {
-                        if (!isRecordingActive) {
+                        android.util.Log.d("OverlayModule", "Sending onStartRecording event")
+                        try {
                             isRecordingActive = true
-                            android.util.Log.d("OverlayModule", "Sending onStartRecording event")
                             sendEvent("onStartRecording", null)
+                        } catch (e: Exception) {
+                            android.util.Log.e("OverlayModule", "Error starting recording", e)
+                            handleError("Failed to start recording: ${e.message}")
                         }
                     }
                     ACTION_STOP_RECORDING -> {
-                        if (isRecordingActive) {
-                            isRecordingActive = false
-                            android.util.Log.d("OverlayModule", "Sending onStopRecording event")
+                        android.util.Log.d("OverlayModule", "Sending onStopRecording event")
+                        try {
                             sendEvent("onStopRecording", null)
+                            isRecordingActive = false
+                        } catch (e: Exception) {
+                            android.util.Log.e("OverlayModule", "Error stopping recording", e)
+                            handleError("Failed to stop recording: ${e.message}")
                         }
                     }
                 }
@@ -64,14 +71,13 @@ class OverlayModule(private val reactContext: ReactApplicationContext) : ReactCo
                     val error = intent.getStringExtra("error")
                     error?.let {
                         android.util.Log.e("OverlayModule", "Recording error: $it")
-                        sendEvent("onRecordingError", it)
-                        isRecordingActive = false
+                        handleError(it)
                     }
                 }
             }
         }
 
-        // Register receivers
+        // Register receivers with appropriate filters
         val recordingFilter = IntentFilter().apply {
             addAction(ACTION_START_RECORDING)
             addAction(ACTION_STOP_RECORDING)
@@ -88,11 +94,29 @@ class OverlayModule(private val reactContext: ReactApplicationContext) : ReactCo
         }
     }
 
+    private fun handleError(errorMessage: String) {
+        android.util.Log.e("OverlayModule", "Error: $errorMessage")
+        isRecordingActive = false
+        sendEvent("onRecordingError", errorMessage)
+
+        // Notify the overlay service to reset its state
+        currentActivity?.let { activity ->
+            val intent = Intent(ACTION_ERROR)
+            intent.setPackage(activity.packageName)
+            intent.putExtra("error", errorMessage)
+            activity.sendBroadcast(intent)
+        }
+    }
+
     private fun sendEvent(eventName: String, params: Any?) {
         android.util.Log.d("OverlayModule", "Emitting event: $eventName")
-        reactContext
-            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-            .emit(eventName, params)
+        try {
+            reactContext
+                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                .emit(eventName, params)
+        } catch (e: Exception) {
+            android.util.Log.e("OverlayModule", "Error sending event: $eventName", e)
+        }
     }
 
     override fun getName(): String = "OverlayModule"
@@ -144,14 +168,30 @@ class OverlayModule(private val reactContext: ReactApplicationContext) : ReactCo
     }
 
     @ReactMethod
-    fun onRecordingError(error: String?) {
-        error?.let {
-            currentActivity?.let { activity ->
-                val intent = Intent("com.transboard.app.RECORDING_ERROR")
-                intent.putExtra("error", it)
-                activity.sendBroadcast(intent)
+    fun hideOverlay(promise: Promise) {
+        try {
+            if (isRecordingActive) {
+                // Stop recording if active
+                val stopIntent = Intent(ACTION_STOP_RECORDING)
+                stopIntent.setPackage(reactContext.packageName)
+                reactContext.sendBroadcast(stopIntent)
             }
+
+            currentActivity?.let { activity ->
+                val intent = Intent(activity, OverlayService::class.java)
+                activity.stopService(intent)
+                promise.resolve(true)
+            } ?: run {
+                promise.reject("NO_ACTIVITY", "No activity available")
+            }
+        } catch (e: Exception) {
+            promise.reject("HIDE_OVERLAY_ERROR", e.message ?: "Failed to hide overlay", e)
         }
+    }
+
+    @ReactMethod
+    fun onRecordingError(error: String?) {
+        error?.let { handleError(it) }
     }
 
     @ReactMethod
