@@ -1,8 +1,12 @@
 package com.transboard.app
 
 import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.PixelFormat
+import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -15,6 +19,9 @@ import android.widget.ImageView
 import android.widget.TextView
 
 class OverlayService : Service() {
+    companion object {
+        private const val ACTION_INSERT_TEXT = "com.transboard.app.INSERT_TEXT"
+    }
     private lateinit var windowManager: WindowManager
     private lateinit var overlayView: View
     private lateinit var params: WindowManager.LayoutParams
@@ -28,6 +35,10 @@ class OverlayService : Service() {
     private var touchY = 0f
     private var initialX = 0
     private var initialY = 0
+    private var lastTouchDownTime = 0L
+    private var hasMovedBeyondThreshold = false
+
+    private var textInsertReceiver: BroadcastReceiver? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -35,6 +46,34 @@ class OverlayService : Service() {
         setupOverlayView()
         setupDragListener()
         initializeTimer()
+        setupTextInsertReceiver()
+    }
+
+    private fun setupTextInsertReceiver() {
+        textInsertReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == ACTION_INSERT_TEXT) {
+                    val text = intent.getStringExtra("text")
+                    if (text != null) {
+                        insertTextIntoFocusedInput(text)
+                    }
+                }
+            }
+        }
+
+        val filter = IntentFilter(ACTION_INSERT_TEXT)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(textInsertReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(textInsertReceiver, filter)
+        }
+    }
+
+    private fun insertTextIntoFocusedInput(text: String) {
+        val intent = Intent(ACTION_INSERT_TEXT)
+        intent.setPackage(applicationContext.packageName)
+        intent.putExtra("text", text)
+        sendBroadcast(intent)
     }
 
     private fun setupOverlayView() {
@@ -46,7 +85,9 @@ class OverlayService : Service() {
             width = WindowManager.LayoutParams.WRAP_CONTENT
             height = WindowManager.LayoutParams.WRAP_CONTENT
             type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
             format = PixelFormat.TRANSLUCENT
             gravity = Gravity.TOP or Gravity.START
             x = 0
@@ -56,46 +97,44 @@ class OverlayService : Service() {
         // Remove separate click listener as we handle it in touch events
     }
 
-    private var isDragging = false
-    private var lastActionTime = 0L
-    private val CLICK_THRESHOLD = 300L // milliseconds, increased for better detection
-    private val MOVE_THRESHOLD = 10f // pixels
+    private val CLICK_DURATION_THRESHOLD = 200L // milliseconds
+    private val MOVE_THRESHOLD = 15f // pixels, slightly increased for better distinction
 
     private fun setupDragListener() {
         overlayView.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    android.util.Log.d("OverlayService", "Touch DOWN")
                     touchX = event.rawX
                     touchY = event.rawY
                     initialX = params.x
                     initialY = params.y
-                    lastActionTime = System.currentTimeMillis()
-                    isDragging = false
+                    lastTouchDownTime = System.currentTimeMillis()
+                    hasMovedBeyondThreshold = false
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    android.util.Log.d("OverlayService", "Touch MOVE")
                     val deltaX = event.rawX - touchX
                     val deltaY = event.rawY - touchY
                     
-                    // Only consider it a drag if moved more than threshold
-                    if (!isDragging && (Math.abs(deltaX) > MOVE_THRESHOLD || Math.abs(deltaY) > MOVE_THRESHOLD)) {
-                        isDragging = true
+                    if (!hasMovedBeyondThreshold && 
+                        (Math.abs(deltaX) > MOVE_THRESHOLD || Math.abs(deltaY) > MOVE_THRESHOLD)) {
+                        hasMovedBeyondThreshold = true
                     }
                     
-                    if (isDragging) {
-                        params.x = initialX + deltaX.toInt()
-                        params.y = initialY + deltaY.toInt()
+                    // Always update position for smooth movement
+                    params.x = initialX + deltaX.toInt()
+                    params.y = initialY + deltaY.toInt()
+                    try {
                         windowManager.updateViewLayout(overlayView, params)
+                    } catch (e: Exception) {
+                        android.util.Log.e("OverlayService", "Error updating view layout", e)
                     }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    val actionTime = System.currentTimeMillis() - lastActionTime
-                    android.util.Log.d("OverlayService", "Touch UP - Time: $actionTime ms, isDragging: $isDragging")
-                    if (!isDragging && actionTime < CLICK_THRESHOLD) {
-                        android.util.Log.d("OverlayService", "Triggering recording toggle")
+                    val touchDuration = System.currentTimeMillis() - lastTouchDownTime
+                    if (!hasMovedBeyondThreshold && touchDuration < CLICK_DURATION_THRESHOLD) {
+                        android.util.Log.d("OverlayService", "Click detected, toggling recording")
                         toggleRecording()
                     }
                     true
@@ -110,26 +149,52 @@ class OverlayService : Service() {
     }
 
     private fun toggleRecording() {
-        isRecording = !isRecording
-        android.util.Log.d("OverlayService", "Toggle recording. isRecording: $isRecording")
-        if (isRecording) startRecording() else stopRecording()
+        if (!isRecording) {
+            // Start recording
+            isRecording = true
+            android.util.Log.d("OverlayService", "Starting recording...")
+            startRecording()
+        } else {
+            // Stop recording
+            isRecording = false
+            android.util.Log.d("OverlayService", "Stopping recording...")
+            stopRecording()
+        }
     }
 
     private fun startRecording() {
         android.util.Log.d("OverlayService", "Starting recording...")
-        recordButton.setImageResource(android.R.drawable.ic_media_pause)
-        timerView.visibility = View.VISIBLE
-        recordingSeconds = 0
-        updateTimer()
-        sendBroadcast(Intent("com.transboard.app.START_RECORDING"))
+        try {
+            recordButton.setImageResource(android.R.drawable.ic_media_pause)
+            timerView.visibility = View.VISIBLE
+            recordingSeconds = 0
+            updateTimer()
+
+            // Use explicit intent with package name
+            val intent = Intent("com.transboard.app.START_RECORDING")
+            intent.setPackage(applicationContext.packageName)
+            sendBroadcast(intent)
+        } catch (e: Exception) {
+            android.util.Log.e("OverlayService", "Error starting recording", e)
+            isRecording = false
+            recordButton.setImageResource(android.R.drawable.ic_btn_speak_now)
+        }
     }
 
     private fun stopRecording() {
         android.util.Log.d("OverlayService", "Stopping recording...")
-        recordButton.setImageResource(android.R.drawable.ic_btn_speak_now)
-        timerView.visibility = View.GONE
-        timerHandler.removeCallbacksAndMessages(null)
-        sendBroadcast(Intent("com.transboard.app.STOP_RECORDING"))
+        try {
+            recordButton.setImageResource(android.R.drawable.ic_btn_speak_now)
+            timerView.visibility = View.GONE
+            timerHandler.removeCallbacksAndMessages(null)
+
+            // Use explicit intent with package name
+            val intent = Intent("com.transboard.app.STOP_RECORDING")
+            intent.setPackage(applicationContext.packageName)
+            sendBroadcast(intent)
+        } catch (e: Exception) {
+            android.util.Log.e("OverlayService", "Error stopping recording", e)
+        }
     }
 
     private fun updateTimer() {
@@ -156,6 +221,10 @@ class OverlayService : Service() {
             windowManager.removeView(overlayView)
         }
         timerHandler.removeCallbacksAndMessages(null)
+        textInsertReceiver?.let {
+            unregisterReceiver(it)
+            textInsertReceiver = null
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

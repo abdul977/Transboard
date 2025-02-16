@@ -7,6 +7,9 @@ import android.content.IntentFilter
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -18,39 +21,70 @@ class OverlayModule(private val reactContext: ReactApplicationContext) : ReactCo
         private const val OVERLAY_PERMISSION_REQ_CODE = 1
         private const val ACTION_START_RECORDING = "com.transboard.app.START_RECORDING"
         private const val ACTION_STOP_RECORDING = "com.transboard.app.STOP_RECORDING"
+        private const val ACTION_ERROR = "com.transboard.app.RECORDING_ERROR"
+        private const val ACTION_INSERT_TEXT = "com.transboard.app.INSERT_TEXT"
     }
 
     private var recordingReceiver: BroadcastReceiver? = null
+    private var errorReceiver: BroadcastReceiver? = null
+    private var isRecordingActive = false
 
     init {
-        setupBroadcastReceiver()
+        setupBroadcastReceivers()
     }
 
-    private fun setupBroadcastReceiver() {
+    private fun setupBroadcastReceivers() {
+        // Recording events receiver
         recordingReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 android.util.Log.d("OverlayModule", "Received broadcast: ${intent?.action}")
                 when (intent?.action) {
                     ACTION_START_RECORDING -> {
-                        android.util.Log.d("OverlayModule", "Sending onStartRecording event")
-                        sendEvent("onStartRecording", null)
+                        if (!isRecordingActive) {
+                            isRecordingActive = true
+                            android.util.Log.d("OverlayModule", "Sending onStartRecording event")
+                            sendEvent("onStartRecording", null)
+                        }
                     }
                     ACTION_STOP_RECORDING -> {
-                        android.util.Log.d("OverlayModule", "Sending onStopRecording event")
-                        sendEvent("onStopRecording", null)
+                        if (isRecordingActive) {
+                            isRecordingActive = false
+                            android.util.Log.d("OverlayModule", "Sending onStopRecording event")
+                            sendEvent("onStopRecording", null)
+                        }
                     }
                 }
             }
         }
 
-        val filter = IntentFilter().apply {
+        // Error events receiver
+        errorReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == ACTION_ERROR) {
+                    val error = intent.getStringExtra("error")
+                    error?.let {
+                        android.util.Log.e("OverlayModule", "Recording error: $it")
+                        sendEvent("onRecordingError", it)
+                        isRecordingActive = false
+                    }
+                }
+            }
+        }
+
+        // Register receivers
+        val recordingFilter = IntentFilter().apply {
             addAction(ACTION_START_RECORDING)
             addAction(ACTION_STOP_RECORDING)
         }
+
+        val errorFilter = IntentFilter(ACTION_ERROR)
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            reactContext.registerReceiver(recordingReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            reactContext.registerReceiver(recordingReceiver, recordingFilter, Context.RECEIVER_NOT_EXPORTED)
+            reactContext.registerReceiver(errorReceiver, errorFilter, Context.RECEIVER_NOT_EXPORTED)
         } else {
-            reactContext.registerReceiver(recordingReceiver, filter)
+            reactContext.registerReceiver(recordingReceiver, recordingFilter)
+            reactContext.registerReceiver(errorReceiver, errorFilter)
         }
     }
 
@@ -97,32 +131,63 @@ class OverlayModule(private val reactContext: ReactApplicationContext) : ReactCo
         }
 
         try {
-            Intent(reactContext, OverlayService::class.java).also { intent ->
-                reactContext.startService(intent)
+            currentActivity?.let { activity ->
+                val intent = Intent(activity, OverlayService::class.java)
+                activity.startService(intent)
+                promise.resolve(true)
+            } ?: run {
+                promise.reject("NO_ACTIVITY", "No activity available")
             }
-            promise.resolve(true)
         } catch (e: Exception) {
-            promise.reject("SHOW_OVERLAY_ERROR", e.message)
+            promise.reject("SHOW_OVERLAY_ERROR", e.message ?: "Failed to show overlay", e)
         }
     }
 
     @ReactMethod
-    fun hideOverlay(promise: Promise) {
-        try {
-            Intent(reactContext, OverlayService::class.java).also { intent ->
-                reactContext.stopService(intent)
+    fun onRecordingError(error: String?) {
+        error?.let {
+            currentActivity?.let { activity ->
+                val intent = Intent("com.transboard.app.RECORDING_ERROR")
+                intent.putExtra("error", it)
+                activity.sendBroadcast(intent)
             }
+        }
+    }
+
+    @ReactMethod
+    fun insertTextIntoFocusedInput(text: String, promise: Promise) {
+        try {
+            val activity = currentActivity
+            if (activity == null) {
+                promise.reject("NO_ACTIVITY", "No activity available")
+                return
+            }
+
+            // Send text insertion request to accessibility service
+            val intent = Intent(ACTION_INSERT_TEXT)
+            intent.putExtra("text", text)
+            intent.setPackage(activity.packageName)
+            activity.sendBroadcast(intent)
             promise.resolve(true)
         } catch (e: Exception) {
-            promise.reject("HIDE_OVERLAY_ERROR", e.message)
+            promise.reject("INPUT_ERROR", "Failed to insert text: ${e.message}")
         }
     }
 
     override fun onCatalystInstanceDestroy() {
         super.onCatalystInstanceDestroy()
-        recordingReceiver?.let {
-            reactContext.unregisterReceiver(it)
-            recordingReceiver = null
+        try {
+            recordingReceiver?.let {
+                reactContext.unregisterReceiver(it)
+                recordingReceiver = null
+            }
+            errorReceiver?.let {
+                reactContext.unregisterReceiver(it)
+                errorReceiver = null
+            }
+            isRecordingActive = false
+        } catch (e: Exception) {
+            android.util.Log.e("OverlayModule", "Error during cleanup", e)
         }
     }
 }
