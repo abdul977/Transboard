@@ -1,19 +1,13 @@
-# feat(overlay): Separate overlay recording from main app functionality
+fix(transcription): improve audio transcription with Groq API
 
-- Create dedicated overlay recording handlers in useOverlay hook
-- Add overlay-specific text insertion logic in TranscriptionService
-- Update OverlayService to handle overlay mode recording states
-- Improve error handling and fallback mechanisms
-- Maintain recording state without triggering main app UI updates
+- Update transcription service to properly handle file uploads
+- Add detailed error logging for API requests
+- Fix model configuration and endpoint settings
+- Add support for verbose_json response format
+- Increase request timeouts and size limits
+- Add comprehensive error handling and debug logging
 
-This change separates the overlay recording functionality from the main app
-while maintaining the existing architecture and services. The overlay now
-operates independently, preventing unwanted navigation and UI updates in
-the main app during overlay recording sessions.
-
-Technical changes:
-
-- Added startOverlayRecording and stopOverlayRecording in useOverlay.ts
-- Enhanced sendToApp method with overlay mode support
-- Updated OverlayService.kt broadcast handling
-- Improved error handling with clipboard fallback
+This change fixes the overlay transcription functionality by properly
+configuring the Groq API integration and improving error handling.
+The changes should resolve issues with transcription not working
+and provide better visibility into any API errors.

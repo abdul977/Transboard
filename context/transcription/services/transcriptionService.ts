@@ -76,8 +76,14 @@ export class TranscriptionService {
       console.log('Creating form data...');
       const formData = new FormData();
       
+      // Create a Blob from the base64 audio data
+      const audioBlob = await (async () => {
+        const response = await fetch(`data:audio/m4a;base64,${base64Audio}`);
+        return response.blob();
+      })();
+      
       formData.append('file', {
-        uri: `data:audio/m4a;base64,${base64Audio}`,
+        uri: uri,
         type: 'audio/m4a',
         name: 'recording.m4a'
       } as any);
@@ -89,22 +95,37 @@ export class TranscriptionService {
       logTranscriptionRequest(formData);
 
       console.log('Sending request to API...');
-      const response = await axios.post<TranscriptionResponse>(
-        this.config.baseURL,
-        formData,
-        { 
-          headers: {
-            ...this.config.headers,
-            'Content-Type': 'multipart/form-data',
-          },
-          timeout: 30000
-        }
-      );
+      try {
+        const response = await axios.post<TranscriptionResponse>(
+          this.config.baseURL,
+          formData,
+          { 
+            headers: {
+              ...this.config.headers,
+              'Content-Type': 'multipart/form-data',
+            },
+            timeout: 30000,
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity
+          }
+        );
 
-      return response.data;
+        console.log('API Response:', response.data);
+        return response.data;
+
+      } catch (apiError) {
+        console.error('API Error:', apiError);
+        if (axios.isAxiosError(apiError)) {
+          console.error('Response:', apiError.response?.data);
+          console.error('Status:', apiError.response?.status);
+          console.error('Headers:', apiError.response?.headers);
+        }
+        throw apiError;
+      }
 
     } catch (err) {
       const errorMessage = formatErrorMessage(err);
+      console.error('Transcription error:', errorMessage);
       throw new Error(errorMessage);
     }
   }

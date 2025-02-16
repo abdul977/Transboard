@@ -14,7 +14,9 @@ export const groqConfig = {
     'Authorization': `Bearer ${GROQ_API_KEY}`,
     'Content-Type': 'multipart/form-data',
     'Accept': 'application/json'
-  }
+  },
+  model: WHISPER_MODEL,  // Add model to config
+  language: 'en'  // Default to English, can be changed via setLanguage
 };
 
 // Initial state
