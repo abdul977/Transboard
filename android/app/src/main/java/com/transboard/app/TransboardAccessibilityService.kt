@@ -62,46 +62,103 @@ class TransboardAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
-        if (event.eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED) {
-            event.source?.let { source ->
-                if (source.isEditable()) {
-                    lastFocusedNode = source
-                    Log.d(TAG, "Stored new focused editable node")
-                }
+        when (event.eventType) {
+            AccessibilityEvent.TYPE_VIEW_FOCUSED -> {
+                event.source?.let { source ->
+                    try {
+                        if (source.isEditable()) {
+                            // Recycle old node if it exists
+                            lastFocusedNode?.recycle()
+                            // Store new node
+                            lastFocusedNode = source
+                            Log.d(TAG, "Stored new focused editable node: ${source.className}, ${source.viewIdResourceName}")
+                        } else {
+                            Log.d(TAG, "Focused node is not editable: ${source.className}")
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error handling focus event", e)
+                    }
+                } ?: Log.w(TAG, "Received focus event with null source")
+            }
+            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> {
+                Log.d(TAG, "Text changed in view: ${event.source?.className}")
             }
         }
     }
 
     private fun insertTextIntoFocusedField(text: String) {
+        if (text.isEmpty()) {
+            Log.w(TAG, "Attempted to insert empty text")
+            return
+        }
+
         lastFocusedNode?.let { node ->
-            if (node.isEditable()) {
-                try {
-                    // Try to insert text using ACTION_SET_TEXT
-                    val arguments = Bundle()
-                    arguments.putCharSequence(
-                        AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-                        text
-                    )
-                    node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-                    Log.d(TAG, "Text inserted successfully via accessibility")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to insert text via accessibility", e)
-                    // Fallback to clipboard
-                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                    val clip = android.content.ClipData.newPlainText("transcribed_text", text)
-                    clipboard.setPrimaryClip(clip)
-                    
-                    // Perform paste action
-                    node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+            try {
+                // Check if node is editable and return early if not
+                if (!node.isEditable()) {
+                    Log.e(TAG, "Last focused node is not editable: ${node.className}")
+                    return@let
                 }
-            } else {
-                Log.e(TAG, "Last focused node is not editable")
+
+                // Try direct text insertion first and track result
+                val setTextSuccess = performDirectTextInsertion(node, text)
+
+                // Handle direct insertion result and try clipboard as fallback
+                if (!setTextSuccess) {
+                    val pasteSuccess = performClipboardPaste(node, text)
+                    if (!pasteSuccess) {
+                        Log.e(TAG, "Both direct insertion and paste fallback failed")
+                    } else {
+                        Log.d(TAG, "Successfully inserted text using clipboard paste")
+                    }
+                } else {
+                    Log.d(TAG, "Successfully inserted text using direct method")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error during text insertion", e)
             }
-        } ?: Log.e(TAG, "No focused node available")
+        } ?: Log.e(TAG, "No focused node available for text insertion")
     }
 
     override fun onInterrupt() {
         Log.d(TAG, "Accessibility Service Interrupted")
+    }
+
+    private fun performDirectTextInsertion(node: AccessibilityNodeInfo, text: String): Boolean {
+        return try {
+            val arguments = Bundle()
+            arguments.putCharSequence(
+                AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                text
+            )
+            val result = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+            Log.d(TAG, "Direct text insertion result: $result")
+            result
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to perform SET_TEXT action", e)
+            false
+        }
+    }
+
+    private fun performClipboardPaste(node: AccessibilityNodeInfo, text: String): Boolean {
+        Log.d(TAG, "Falling back to clipboard paste method")
+        return try {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            val clip = android.content.ClipData.newPlainText("transcribed_text", text)
+            clipboard.setPrimaryClip(clip)
+            
+            // Try to paste
+            val pasteResult = node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+            Log.d(TAG, "Paste action result: $pasteResult")
+            
+            if (!pasteResult) {
+                Log.e(TAG, "Failed to paste text")
+            }
+            pasteResult
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during paste fallback", e)
+            false
+        }
     }
 
     override fun onDestroy() {

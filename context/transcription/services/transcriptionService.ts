@@ -110,11 +110,15 @@ export class TranscriptionService {
           }
         );
 
-        console.log('API Response:', response.data);
+        console.log('🎯 API Response received');
+        if (!response.data) {
+          throw new Error('Empty response from API');
+        }
+        console.log('📝 Transcribed text:', response.data.text);
         return response.data;
 
       } catch (apiError) {
-        console.error('API Error:', apiError);
+        console.error('❌ API Error:', apiError);
         if (axios.isAxiosError(apiError)) {
           console.error('Response:', apiError.response?.data);
           console.error('Status:', apiError.response?.status);
@@ -141,23 +145,35 @@ export class TranscriptionService {
   }
 
   async sendToApp(text: string, appPackage?: string, isOverlayMode: boolean = false): Promise<void> {
+    if (!text) {
+      console.error('❌ Attempted to send empty text to app');
+      return;
+    }
+
     try {
       if (Platform.OS === 'ios') {
         await Clipboard.setStringAsync(text);
         Alert.alert('Success', 'Text copied to clipboard. Please paste in your desired app.');
       } else {
         if (isOverlayMode) {
+          console.log('🎯 Attempting to insert text via accessibility service');
           try {
-            // Try to insert text directly
+            // Try to insert text directly using the accessibility service
             const inserted = await NativeModules.OverlayModule.insertTextIntoFocusedInput(text);
+            console.log('📝 Text insertion result:', inserted ? 'Success' : 'Failed');
+            
             if (!inserted) {
-              // If direct insertion fails, fallback to clipboard
+              console.log('⚠️ Direct insertion failed, falling back to clipboard');
               await Clipboard.setStringAsync(text);
+              Alert.alert('Note', 'Text copied to clipboard - please paste manually');
+            } else {
+              console.log('✅ Text inserted successfully');
             }
           } catch (error) {
-            console.error('Text insertion error:', error);
-            // Fallback to clipboard
+            console.error('❌ Text insertion error:', error);
+            console.log('⚠️ Falling back to clipboard');
             await Clipboard.setStringAsync(text);
+            Alert.alert('Note', 'Text copied to clipboard - please paste manually');
           }
         } else if (appPackage) {
           await IntentLauncher.startActivityAsync('android.intent.action.SEND', {
