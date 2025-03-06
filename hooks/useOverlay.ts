@@ -16,6 +16,7 @@ interface OverlayModuleMethods {
   showOverlay(): Promise<boolean>;
   hideOverlay(): Promise<boolean>;
   onRecordingError?: (error: string) => void;
+  transcribeAndInsertText(audioUri: string, promise: Promise<void>): void;
 }
 
 // Interface that extends NativeModule for EventEmitter compatibility
@@ -142,11 +143,9 @@ export const useOverlay = () => {
       dispatch({ type: 'SET_RECORDING', payload: false });
       
       if (uri) {
-        const response = await transcriptionService.processRecording(uri);
-        // Send text directly to focused input without updating main app state
-        if (response.text) {
-          await transcriptionService.sendToApp(response.text, undefined, true);
-        }
+        await OverlayModule.transcribeAndInsertText(uri, new Promise<void>((resolve, reject) => {
+          resolve();
+        }));
       }
     } catch (error) {
       console.error('[useOverlay] Stop recording error:', error);

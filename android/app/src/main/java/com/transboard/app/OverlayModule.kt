@@ -214,6 +214,18 @@ class OverlayModule(private val reactContext: ReactApplicationContext) : ReactCo
         }
     }
 
+    @ReactMethod
+    fun transcribeAndInsertText(audioUri: String, promise: Promise) {
+        try {
+            // Transcribe the audio and insert the text into the focused input
+            val transcriptionService = TranscriptionService()
+            val transcribedText = transcriptionService.transcribeAudio(audioUri)
+            insertTextIntoFocusedInput(transcribedText, promise)
+        } catch (e: Exception) {
+            promise.reject("TRANSCRIPTION_ERROR", "Failed to transcribe audio: ${e.message}")
+        }
+    }
+
     override fun onCatalystInstanceDestroy() {
         super.onCatalystInstanceDestroy()
         try {
