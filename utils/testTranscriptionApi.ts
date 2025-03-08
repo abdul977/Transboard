@@ -4,21 +4,55 @@ import { GROQ_API_KEY } from '../context/transcription/reducer';
 
 export async function testGroqApiConnection() {
   try {
-    const response = await axios.get('https://api.groq.com/healthz', {
+    // First test basic connectivity
+    const healthResponse = await axios.get('https://api.groq.com/healthz', {
       headers: {
         'Authorization': `Bearer ${GROQ_API_KEY}`,
       }
     });
 
-    if (response.status === 200) {
-      console.log('✅ Groq API connection successful');
-      Alert.alert('Success', 'API connection test successful');
-    } else {
-      throw new Error(`API returned status ${response.status}`);
+    if (healthResponse.status !== 200) {
+      throw new Error(`Health check failed: ${healthResponse.status}`);
     }
-  } catch (error) {
+
+    // Then test audio transcription endpoint with a small test file
+    const testAudio = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='; // Empty WAV file
+    const formData = new FormData();
+    
+    const blob = await fetch(testAudio).then(r => r.blob());
+    formData.append('file', blob, 'test.wav');
+    formData.append('model', 'whisper-large-v3-turbo');
+    formData.append('response_format', 'verbose_json');
+
+    const testResponse = await axios.post('https://api.groq.com/openai/v1/audio/transcriptions', 
+      formData,
+      {
+        headers: {
+          'Authorization': `Bearer ${GROQ_API_KEY}`,
+          'Content-Type': 'multipart/form-data',
+        }
+      }
+    );
+
+    console.log('✅ Groq API connection successful');
+    console.log('📝 Transcription endpoint test:', testResponse.status);
+    
+    Alert.alert('Success', 'API connection and transcription endpoint test successful');
+    
+  } catch (error: unknown) {
     console.error('❌ Groq API connection failed:', error);
-    Alert.alert('Error', 'API connection test failed. Please check your API key and internet connection.');
+    if (axios.isAxiosError(error)) {
+      console.error('API Error Details:', {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data
+      });
+      Alert.alert('Error', `API test failed: ${error.response?.data?.error || error.message}`);
+    } else if (error instanceof Error) {
+      Alert.alert('Error', `API test failed: ${error.message}`);
+    } else {
+      Alert.alert('Error', 'An unknown error occurred while testing the API connection');
+    }
   }
 }
 

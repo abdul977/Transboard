@@ -76,36 +76,71 @@ export class TranscriptionService {
       console.log('Creating form data...');
       const formData = new FormData();
       
-      formData.append('file', {
-        uri: `data:audio/m4a;base64,${base64Audio}`,
-        type: 'audio/m4a',
-        name: 'recording.m4a'
-      } as any);
+      const blob = await fetch(`data:audio/m4a;base64,${base64Audio}`).then(r => r.blob());
+      formData.append('file', blob, 'recording.m4a');
       
-      formData.append('model', this.config.model);
-      formData.append('language', this.config.language);
+      formData.append('model', 'whisper-large-v3-turbo');
       formData.append('response_format', 'verbose_json');
+      formData.append('language', 'en'); // Optional but recommended for better accuracy
+      formData.append('temperature', '0'); // Add temperature parameter
 
       logTranscriptionRequest(formData);
 
       console.log('Sending request to API...');
-      const response = await axios.post<TranscriptionResponse>(
-        this.config.baseURL,
-        formData,
-        { 
-          headers: {
-            ...this.config.headers,
-            'Content-Type': 'multipart/form-data',
-          },
-          timeout: 30000
+      const maxRetries = 3;
+      let lastError: Error | null = null;
+
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          console.log(`Attempt ${attempt} of ${maxRetries}...`);
+          const response = await axios.post<TranscriptionResponse>(
+            this.config.baseURL,
+            formData,
+            { 
+              headers: {
+                ...this.config.headers,
+                'Content-Type': 'multipart/form-data',
+              },
+              timeout: 30000,
+              onUploadProgress: (progressEvent) => {
+                console.log('Upload Progress:', Math.round((progressEvent.loaded / progressEvent.total!) * 100), '%');
+              }
+            }
+          );
+
+          if (!response.data) {
+            throw new Error('No response data received from API');
+          }
+
+          console.log('API Response:', response.status, response.statusText);
+          return response.data;
+
+        } catch (err) {
+          lastError = err as Error;
+          console.error(`Attempt ${attempt} failed:`, err);
+          
+          if (attempt === maxRetries) {
+            if (axios.isAxiosError(err)) {
+              console.error('API Error Details:', {
+                status: err.response?.status,
+                statusText: err.response?.statusText,
+                data: err.response?.data
+              });
+              throw new Error(`API Error: ${err.response?.data?.error || err.message}`);
+            }
+            throw err;
+          }
+          
+          // Wait before retrying (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
         }
-      );
+      }
 
-      return response.data;
-
+      // If we get here, all retries failed
+      throw lastError || new Error('All transcription attempts failed');
     } catch (err) {
-      const errorMessage = formatErrorMessage(err);
-      throw new Error(errorMessage);
+      console.error('Transcription Error:', err);
+      throw err;
     }
   }
 
